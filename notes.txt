@@ -1,0 +1,168 @@
+# Discoveries
+
+## Pfam ID: PF26733.1
+- I was going through this first family as an example. 
+- I collected MSAs columns, filtered them by entropy, only looked at columns between 25th and 75th percentiles in terms of entropy. 
+- Collected 2556 interacting columns, out of 22801 possible pairs
+- i keyed in on residue 22 for some reason
+	- i located residue 22 in the MSA
+	- i gathered a memember of the family, A0AA39D153, downloaded its predicted structure
+	- i tried to find where V22 from the alignment falls into the structure, looked for sequence patterns
+		- found its residue number 432
+	- i looked around V432/22 and tried to think which positions would be contacting that
+	- it didnt take me long to find I503, found I503 in the MSA, found its 133 
+		- I believe i took into account 0 vs 1 indexing?
+	- V22 and I503 do have frequency histogram matching
+	- d(V22, I133) = 0.54 in manhattan distance
+	- the two columns have the following sequences:
+	I I
+V V
+C I
+I V
+C V
+C I
+V V
+C V
+A V
+V L
+C V
+C V
+C V
+C I
+C I
+C I
+C I
+C V
+C V
+C T
+C V
+C T
+C I
+C V
+C I
+C I
+C I
+C I
+C I
+C I
+C I
+C I
+C I
+C V
+A I
+A L
+F I
+F I
+F I
+F I
+F L
+. I
+F I
+F I
+F I
+F V
+F I
+V I
+V I
+A I
+A I
+A I
+A L
+G I
+S I
+C I
+A I
+A I
+A I
+A M
+C V
+L I
+L G
+L G
+L G
+M G
+M G
+L G
+C I
+C V
+C V
+A G
+C V
+A V
+S L
+S V
+A V
+C V
+C V
+C I
+C I
+C V
+V V
+C V
+V I
+C I
+M V
+F V
+C V
+T I
+C V
+M I
+C I
+C I
+C V
+C V
+C V
+C I
+C V
+C I
+C V
+C I
+C I
+C V
+L I
+C I
+C I
+C I
+L L
+L L
+M I
+L I
+L V
+V I
+V V
+V V
+V V
+Q V
+L V
+M I
+L V
+L V
+C I
+V I
+I I
+C V
+F M
+I I
+C I
+C V
+L I
+C I
+C I
+I I
+L R
+V F
+V I
+C I
+C I
+V I
+C I
+C V
+C I
+C I
+C I
+C I
+C I
+C I
+V I
+A I
+I I

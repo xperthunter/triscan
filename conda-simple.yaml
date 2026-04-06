@@ -1,0 +1,9 @@
+name: simple
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python>=3.12.10
+  - sqlite
+  - time
