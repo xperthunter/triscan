@@ -13,6 +13,7 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 	print(msa.accession)
 	
 	col_freqs = []
+	col_aafreqs = []
 	for i in range(msa.length):
 		c = msa.column(i)
 		aafreqs = {}
@@ -21,8 +22,8 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 			
 			aafreqs[aa] += 1 / msa.depth
 		
+		col_aafreqs.append(aafreqs)
 		aafreqs = {int(ii):v for ii, (k,v) in enumerate(sorted(aafreqs.items(), key = lambda x: x[1], reverse=True))}
-		#print(json.dumps(aafreqs,indent=2))
 		col_freqs.append(aafreqs)
 	
 	entropys = []
@@ -36,11 +37,11 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 		s[i] = -1.0*entropy
 	
 	entropys = np.array(entropys)
-	print(f"avg S: {np.mean(entropys):.2f} 0.25-q: {np.quantile(entropys,0.25):.2f} 0.75-q: {np.quantile(entropys,0.75):.2f}")
+	print(f"\tavg S: {np.mean(entropys):.2f} 0.25-q: {np.quantile(entropys,0.25):.2f} 0.75-q: {np.quantile(entropys,0.75):.2f}")
 	
 	distances = {}
-	lower_b = np.quantile(entropys,0.25)
-	upper_b = np.quantile(entropys,0.75)
+	lower_b = np.quantile(entropys,0.30)
+	upper_b = np.quantile(entropys,0.70)
 	for i, ci in enumerate(col_freqs):
 		
 		if s[i] < lower_b or s[i] > upper_b:
@@ -69,38 +70,15 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 			distances[(i,j)] = dis
 	
 	for k,v in sorted(distances.items(), key=lambda x: x[1], reverse=True):
-		if k[0] != 22: continue
-		print(k,v)
+		print(f'pair: {k} dis: {v:.4f}')
+	
+	print(json.dumps({k:v for k,v in sorted(col_aafreqs[74].items(), key = lambda x: x[1])},indent=2))
+	print()
+	print(json.dumps({k:v for k,v in sorted(col_aafreqs[75].items(), key = lambda x: x[1])},indent=2))
+	#print(dict(k:v for k,v in sorted(col_aafreqs[111].items(), lambda x: x[1]))
+	
 	
 	print(len(distances))
 	print(msa.depth ** 2)
 	
-	for e23, e33 in zip(msa.column(22), msa.column(133)):
-		print(e23, e33)
-	
-	print(msa.length)
-	sys.exit()
-			
-			
-			
-			
-			
-		
-		
-	
-	
-	"""
-	for seq in msa.seqs:
-		print(seq)
-		
-	c = msa.column(11)
-	print(c)
-	
-	for i in range(msa.length):
-		for j in range(i, msa.length):
-			ci = msa.column(i)
-			cj = msa.column(j)
-			
-			for a,b in zip(ci, cj):
-	"""
 	sys.exit()
