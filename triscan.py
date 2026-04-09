@@ -154,8 +154,8 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 	print(f"\tavg S: {np.mean(entropys):.2f} 0.25-q: {np.quantile(entropys,0.25):.2f} 0.75-q: {np.quantile(entropys,0.75):.2f}")
 	
 	distances = {}
-	lower_b = np.quantile(entropys,0.2)
-	upper_b = np.quantile(entropys,0.8)
+	lower_b = np.quantile(entropys,0.25)
+	upper_b = np.quantile(entropys,0.75)
 	for i, ci in enumerate(col_freqs):
 		
 		if s[i] < lower_b or s[i] > upper_b:
@@ -187,18 +187,21 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 	max_mutual = mutuals_sorted[-1]
 	min_mutual = mutuals_sorted[0]
 	
-	for ii, (k,v) in enumerate(sorted(distances.items(), key=lambda x: x[1])):
+	for ii, (k,v) in enumerate(sorted(distances.items(), key=lambda x: x[1], reverse=True)):
 		print(f'pair: {k} dis: {v:.4f} m_ij: {mutual[k]:.4f} max: {max_mutual:.4f} min: {min_mutual:.4f}')
-		if ii == 15: break
+		#if ii == 15: break
 	
-	#print(json.dumps({k:v for k,v in sorted(col_aafreqs[74].items(), key = lambda x: x[1])},indent=2))
-	#print()
-	#print(json.dumps({k:v for k,v in sorted(col_aafreqs[75].items(), key = lambda x: x[1])},indent=2))
+	for e22, e133 in zip(msa.column(22), msa.column(133)):
+		print(e22, e133)
+	
+	print(json.dumps({k:v for k,v in sorted(col_aafreqs[22].items(), key = lambda x: x[1])},indent=2))
+	print()
+	print(json.dumps({k:v for k,v in sorted(col_aafreqs[133].items(), key = lambda x: x[1])},indent=2))
 	#print(dict(k:v for k,v in sorted(col_aafreqs[111].items(), lambda x: x[1]))
 	
 	
 	print(len(distances))
 	print(msa.length ** 2)
 	counter += 1
-	
+	sys.exit()
 	if counter == 10: sys.exit()
