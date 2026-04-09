@@ -166,3 +166,8 @@ C I
 V I
 A I
 I I
+
+
+
+https://www.genome.jp/aaindex/
+
