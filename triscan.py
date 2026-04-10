@@ -70,6 +70,16 @@ norm_pI = {k:v/10.76 for k,v in pI.items()}
 q_squared = list(product(q, q))
 
 
+def one_body_potentials(col1, col2):
+
+	cijs = []
+
+	for ei, ej in zip(col1, col2):
+		cij = 0
+	if e22 in norm_kd and e133 in norm_kd:
+			cij = -1.0*norm_kd[e22]*norm_kd[e133] + 0.1*norm_pI[e22]*norm_pI[e133]
+
+
 def m_eff(similarity_scores):
 	m_eff = 0
 	for v in similarity_scores.values():
@@ -203,6 +213,7 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 	print(f"\tavg S: {np.mean(entropys):.2f} 0.1-q: {np.quantile(entropys,0.1):.2f} 0.9-q: {np.quantile(entropys,0.9):.2f}")
 	
 	distances = {}
+	cij_scores = {}
 	lower_b = np.quantile(entropys,0.25)
 	upper_b = np.quantile(entropys,0.75)
 	for i, ci in enumerate(col_freqs):
@@ -231,6 +242,9 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 					sys.exit()
 			
 			distances[(i,j)] = dis
+
+			for e1, e2
+
 	
 	mutuals_sorted = list(sorted(mutual.values()))
 	max_mutual = mutuals_sorted[-1]
@@ -263,15 +277,21 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 	snr = cijbar/cijstd
 
 	print(f"cij info: mean: {cijbar:.4f} std: {cijstd:.4f} snr: {snr:.4f}")
-	sys.exit()
-	print(json.dumps({k:v for k,v in sorted(col_aafreqs[22].items(), key = lambda x: x[1])},indent=2))
-	print()
-	print(json.dumps({k:v for k,v in sorted(col_aafreqs[133].items(), key = lambda x: x[1])},indent=2))
+	#sys.exit()
+	#print(json.dumps({k:v for k,v in sorted(col_aafreqs[22].items(), key = lambda x: x[1])},indent=2))
+	#print()
+	#print(json.dumps({k:v for k,v in sorted(col_aafreqs[133].items(), key = lambda x: x[1])},indent=2))
 	#print(dict(k:v for k,v in sorted(col_aafreqs[111].items(), lambda x: x[1]))
 	
 	
 	print(len(distances))
 	print(msa.length ** 2)
+
+	for i in range(msa.length):
+		for j in range(i+1, msa.length):
+
+
+
 	counter += 1
 	sys.exit()
 	if counter == 10: sys.exit()
