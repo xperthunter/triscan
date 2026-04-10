@@ -6,6 +6,7 @@ import math
 import sys
 
 import numpy as np
+import scipy.stats
 
 import msalib
 
@@ -17,6 +18,54 @@ q = [
 	'.'
 ]
 
+kd_scale = {
+	"I":4.5,
+	"V":4.2,
+	"L":3.8,
+	"F":2.8,
+	"C":2.5,
+	"M":1.9,
+	"A":1.8,
+	"G":-0.4,
+	"T":-0.7,
+	"S":-0.8,
+	"W":-0.9,
+	"Y":-1.3,
+	"P":-1.6,
+	"H":-3.2,
+	"E":-3.5,
+	"Q":-3.5,
+	"D":-3.5,
+	"N":-3.5,
+	"K":-3.9,
+	"R":-4.5
+}
+
+pI = {
+	"I":6.02,
+	"A":6.00,
+	"L":5.98,
+	"R":10.76,
+	"K":9.74,
+	"N":5.41,
+	"M":5.74,
+	"D":2.77,
+	"F":5.48,
+	"C":5.05,
+	"P":6.30,
+	"Q":5.65,
+	"S":5.68,
+	"E":3.22,
+	"T":5.66,
+	"G":5.97,
+	"W":5.89,
+	"H":7.59,
+	"Y":5.66,
+	"V":5.96
+}
+
+norm_kd = {k:v/4.5 for k,v in kd_scale.items()}
+norm_pI = {k:v/10.76 for k,v in pI.items()}
 
 q_squared = list(product(q, q))
 
@@ -151,7 +200,7 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 		s[i] = -1.0*entropy
 	
 	entropys = np.array(entropys)
-	print(f"\tavg S: {np.mean(entropys):.2f} 0.25-q: {np.quantile(entropys,0.25):.2f} 0.75-q: {np.quantile(entropys,0.75):.2f}")
+	print(f"\tavg S: {np.mean(entropys):.2f} 0.1-q: {np.quantile(entropys,0.1):.2f} 0.9-q: {np.quantile(entropys,0.9):.2f}")
 	
 	distances = {}
 	lower_b = np.quantile(entropys,0.25)
@@ -187,13 +236,34 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 	max_mutual = mutuals_sorted[-1]
 	min_mutual = mutuals_sorted[0]
 	
+	mins = []
+	mutuals = []
 	for ii, (k,v) in enumerate(sorted(distances.items(), key=lambda x: x[1], reverse=True)):
 		print(f'pair: {k} dis: {v:.4f} m_ij: {mutual[k]:.4f} max: {max_mutual:.4f} min: {min_mutual:.4f}')
+
+		mins.append(v)
+		mutuals.append(mutual[k])
+
 		#if ii == 15: break
 	
+	r, p = scipy.stats.pearsonr(mins, mutuals)
+	print(f"corr: {r:.4f} p: {p:1.2E}")
+
+	cijs = []
 	for e22, e133 in zip(msa.column(22), msa.column(133)):
-		print(e22, e133)
+		cij = None
+		if e22 in norm_kd and e133 in norm_kd:
+			cij = -1.0*norm_kd[e22]*norm_kd[e133] + 0.1*norm_pI[e22]*norm_pI[e133]
+			cijs.append(cij)
+		print(e22, e133, cij)
 	
+	cijs = np.array(cijs)
+	cijbar = np.mean(cijs)
+	cijstd = np.std(cijs)
+	snr = cijbar/cijstd
+
+	print(f"cij info: mean: {cijbar:.4f} std: {cijstd:.4f} snr: {snr:.4f}")
+	sys.exit()
 	print(json.dumps({k:v for k,v in sorted(col_aafreqs[22].items(), key = lambda x: x[1])},indent=2))
 	print()
 	print(json.dumps({k:v for k,v in sorted(col_aafreqs[133].items(), key = lambda x: x[1])},indent=2))
