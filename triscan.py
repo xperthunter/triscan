@@ -70,14 +70,40 @@ norm_pI = {k:v/10.76 for k,v in pI.items()}
 q_squared = list(product(q, q))
 
 
+def index_mapper(lid, seq):
+
+	lid_info = lid.split('/')
+	ends = lid_info[-1].split('-')
+
+	beg, end = int(ends[0]), int(ends[1])
+
+	j = 0
+	mapper = {}
+	for i, sym in enumerate(seq):
+		if sym == '.':
+			continue
+		j += 1
+		mapper[int(i)] = beg + j - 1
+
+	return mapper
+
+
 def one_body_potentials(col1, col2):
-
 	cijs = []
-
 	for ei, ej in zip(col1, col2):
 		cij = 0
-	if e22 in norm_kd and e133 in norm_kd:
-			cij = -1.0*norm_kd[e22]*norm_kd[e133] + 0.1*norm_pI[e22]*norm_pI[e133]
+		if ei in norm_kd and ej in norm_kd:
+			cij = norm_kd[ei]*norm_kd[ej] + 0.1*norm_pI[ei]*norm_pI[ej]
+			cijs.append(cij)
+
+	if len(cijs) == 0:
+		return None
+
+	cijs = np.array(cijs)
+
+	snr = np.mean(cijs) / np.std(cijs)
+
+	return snr
 
 
 def m_eff(similarity_scores):
@@ -95,6 +121,7 @@ def make_ma(seqs, cutoff):
 	
 	return sim_scores
 
+
 def m_a(seq_i, seqs, cutoff):
 	
 	m_a = 0
@@ -110,6 +137,7 @@ def m_a(seq_i, seqs, cutoff):
 	
 	m_a = m_a
 	return m_a
+
 
 def f_i(msa, ma_scores, ll):
 	
@@ -127,6 +155,7 @@ def f_i(msa, ma_scores, ll):
 		for k in fi[i].keys(): fi[i][k] = fi[i][k] * (1 / ((1+ll)*meff))
 	
 	return fi
+
 
 def f_ij(msa, ma_scores, ll):
 	
@@ -162,31 +191,32 @@ def mutual_information_ij(f1, f2):
 	
 	return mutual
 
+
 counter = 0
 for msa in msalib.read_stockholm(sys.argv[1]):
 	print(msa.identifier)
 	print(msa.accession)
-	
-	col_freqs = []
-	col_aafreqs = []
-	
+
+	# Set-up Mutual Information Calculation
 	max_similarity = 0.7
 	ma = make_ma(msa.seqs, max_similarity)
 	meff = m_eff(ma)
 	
-	print(meff)
-	print(len(msa.seqs))
+	print(f"m_eff: {meff:.2f} # of seqs: {len(msa.seqs)}")
 	
-	single_corr = f_i(msa, ma, 1.25)
-	#print(json.dumps(single_point_correlations,indent=2))
+	# Compute Single Point Correlations -- amino acid preferences per column
+	single_corr = f_i(msa, ma, 1.25) # msa obj, seq. sim scaling, pseudo-counts
 	
+	# Compute Two Point Correlations -- how often does aa_A and aa_B appear in columns i,j
 	two_corr = f_ij(msa, ma, 1.25)
 	
+	# Mutual information -- info. gain when assuming two columns occur together, versus separate
 	mutual = mutual_information_ij(single_corr, two_corr)
-	#for k,v in sorted(mutual.items(), key=lambda x: x[1]):
-	#	print(k,v)
-	#sys.exit()
 	
+	# gather column frequencies
+	col_aafreqs = []
+	aafreqs     = []
+	col_freqs   = []
 	for i in range(msa.length):
 		c = msa.column(i)
 		aafreqs = {}
@@ -199,6 +229,7 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 		aafreqs = {int(ii):v for ii, (k,v) in enumerate(sorted(aafreqs.items(), key = lambda x: x[1], reverse=True))}
 		col_freqs.append(aafreqs)
 	
+	# compute entropy per column
 	entropys = []
 	s = dict()
 	for i, c in enumerate(col_freqs):
@@ -210,10 +241,12 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 		s[i] = -1.0*entropy
 	
 	entropys = np.array(entropys)
-	print(f"\tavg S: {np.mean(entropys):.2f} 0.1-q: {np.quantile(entropys,0.1):.2f} 0.9-q: {np.quantile(entropys,0.9):.2f}")
-	
+	print(f"avg S: {np.mean(entropys):.2f} 0.1-q: {np.quantile(entropys,0.1):.2f} 0.9-q: {np.quantile(entropys,0.9):.2f}")
+
+	# compute frequency distr. dis. on pairs of columns
 	distances = {}
 	cij_scores = {}
+	mij = {}
 	lower_b = np.quantile(entropys,0.25)
 	upper_b = np.quantile(entropys,0.75)
 	for i, ci in enumerate(col_freqs):
@@ -221,10 +254,16 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 		if s[i] < lower_b or s[i] > upper_b:
 			continue
 		
-		for j in range(i+1, msa.length):
+		for j in range(i+5, msa.length):
 			
 			if s[j] < lower_b or s[j] > upper_b:
 				continue
+
+			coupling = one_body_potentials(msa.column(i), msa.column(j))
+			if coupling is None:
+				continue
+
+			cij_scores[(i,j)] = coupling
 			
 			dis = 0
 			cj = col_freqs[j]
@@ -242,15 +281,55 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 					sys.exit()
 			
 			distances[(i,j)] = dis
-
-			for e1, e2
-
+			mij[(i,j)] = mutual[(i,j)]
 	
-	mutuals_sorted = list(sorted(mutual.values()))
-	max_mutual = mutuals_sorted[-1]
-	min_mutual = mutuals_sorted[0]
-	
-	mins = []
+	avg_mutual = np.mean(np.array(list(mij.values())))
+	std_mutual = np.std(np.array(list(mij.values())))
+	mutual_norm = {k:((v - avg_mutual)/std_mutual) for k,v in mij.items()}
+
+	norm_distances = {k:(2.0 - v) for k,v in distances.items()}
+	mean_dis = np.mean(np.array(list(norm_distances.values())))
+	std_dis  = np.std(np.array(list(norm_distances.values())))
+	norm_distances = {k:((v - mean_dis) / std_dis) for k,v in norm_distances.items()}
+
+	mean_cij  = np.mean(np.array(list(cij_scores.values())))
+	std_cij   = np.std(np.array(list(cij_scores.values())))
+	norm_cijs = {k:((v - mean_cij) / std_cij) for k,v in cij_scores.items()}
+
+	sum_zscores = {k:(mutual_norm[k] + norm_distances[k] + norm_cijs[k]) for k in norm_cijs.keys()}
+
+	imapper = index_mapper(msa.lids[0], msa.seqs[0])
+	for k,v in sorted(sum_zscores.items(), key = lambda x: x[1]):
+		try:
+			l = (imapper[int(k[0])], imapper[int(k[1])])
+			print(f"pair: {l} sum of z-scores: {v:.4f} m_ij: {mij[k]:.4f} d_ij: {distances[k]:.4f} c_ij: {cij_scores[k]:.4f}")
+		except:
+			continue
+
+	mutual_norm    = {k:v for k,v in sorted(mutual_norm.items(), key=lambda x: x[1])}
+	norm_distances = {k:norm_distances[k] for k in mutual_norm.keys()}
+	norm_cijs      = {k:norm_cijs[k] for k in mutual_norm.keys()}
+
+	data = np.array(
+		[
+			np.array(list(mutual_norm.values())),
+			np.array(list(norm_distances.values())),
+			np.array(list(norm_cijs.values()))
+		]
+	)
+
+	corrs = np.corrcoef(data)
+	print(corrs)
+
+	print(msa.identifier)
+	print(msa.accession)
+	print(len(msa.seqs[0]))
+
+
+	sys.exit()
+
+	"""
+		mins = []
 	mutuals = []
 	for ii, (k,v) in enumerate(sorted(distances.items(), key=lambda x: x[1], reverse=True)):
 		print(f'pair: {k} dis: {v:.4f} m_ij: {mutual[k]:.4f} max: {max_mutual:.4f} min: {min_mutual:.4f}')
@@ -259,9 +338,8 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 		mutuals.append(mutual[k])
 
 		#if ii == 15: break
-	
-	r, p = scipy.stats.pearsonr(mins, mutuals)
-	print(f"corr: {r:.4f} p: {p:1.2E}")
+
+
 
 	cijs = []
 	for e22, e133 in zip(msa.column(22), msa.column(133)):
@@ -295,3 +373,4 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 	counter += 1
 	sys.exit()
 	if counter == 10: sys.exit()
+	"""
