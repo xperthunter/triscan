@@ -15,7 +15,7 @@ q = [
 	'G','H','I','K','L',
 	'M','N','P','Q','R',
 	'S','T','V','W','Y',
-	'.'
+	'.','-','X','i'
 ]
 
 kd_scale = {
@@ -125,15 +125,25 @@ def make_ma(seqs, cutoff):
 def m_a(seq_i, seqs, cutoff):
 	
 	m_a = 0
+	L = len(seq_i)
+	max_mismatch = L * (1 - cutoff)
 	for i, seq_j in enumerate(seqs):
 		assert(len(seq_j) == len(seq_i))
-		similarity = 0
-		for ei, ej in zip(seq_i, seq_j):
-			if ei == ej:
-				similarity += 1 / len(seq_i)
-		
-		#print(similarity)
-		if similarity > cutoff: m_a += 1
+		mismatches = 0
+		similar = True
+		for j, (ei, ej) in enumerate(zip(seq_i, seq_j)):
+			if ei != ej:
+				mismatches += 1
+
+			if mismatches > max_mismatch:
+				similar = False
+				break
+
+			if mismatches + (L-j ) < max_mismatch:
+				break
+
+		if similar:
+			m_a += 1
 	
 	m_a = m_a
 	return m_a
@@ -196,14 +206,23 @@ counter = 0
 for msa in msalib.read_stockholm(sys.argv[1]):
 	print(msa.identifier)
 	print(msa.accession)
+	print(f"num of seqs: {len(msa.seqs)}")
+	print(f"msa width: {len(msa.seqs[0])}")
 
 	# Set-up Mutual Information Calculation
-	max_similarity = 0.7
-	ma = make_ma(msa.seqs, max_similarity)
-	meff = m_eff(ma)
+	#max_similarity = 0.7
+	#ma = make_ma(msa.seqs, max_similarity)
+	#meff = m_eff(ma)
 	
-	print(f"m_eff: {meff:.2f} # of seqs: {len(msa.seqs)}")
-	
+	#print(json.dumps(ma,indent=2))
+
+	#print(f"m_eff: {meff:.2f} # of seqs: {len(msa.seqs)}")
+	#print(f"msa width: {len(msa.seqs[0])}")
+
+	#sys.exit()
+
+	ma = {k:len(msa.seqs) for k in range(len(msa.seqs))}
+
 	# Compute Single Point Correlations -- amino acid preferences per column
 	single_corr = f_i(msa, ma, 1.25) # msa obj, seq. sim scaling, pseudo-counts
 	
