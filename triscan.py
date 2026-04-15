@@ -101,7 +101,7 @@ def one_body_potentials(col1, col2):
 
 	cijs = np.array(cijs)
 
-	snr = np.mean(cijs) / np.std(cijs)
+	snr = abs(np.mean(cijs) / np.std(cijs))
 
 	return snr
 
@@ -208,16 +208,19 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 	print(msa.accession)
 	print(f"num of seqs: {len(msa.seqs)}")
 	print(f"msa width: {len(msa.seqs[0])}")
+	#print(msa.cons)
+	#print(msa.cons[30], msa.cons[43])
+	#sys.exit()
 
 	# Set-up Mutual Information Calculation
-	#max_similarity = 0.7
-	#ma = make_ma(msa.seqs, max_similarity)
-	#meff = m_eff(ma)
+	max_similarity = 0.8
+	ma = make_ma(msa.seqs, max_similarity)
+	meff = m_eff(ma)
 	
 	#print(json.dumps(ma,indent=2))
 
-	#print(f"m_eff: {meff:.2f} # of seqs: {len(msa.seqs)}")
-	#print(f"msa width: {len(msa.seqs[0])}")
+	print(f"m_eff: {meff:.2f} # of seqs: {len(msa.seqs)}")
+	print(f"msa width: {len(msa.seqs[0])}")
 
 	#sys.exit()
 
@@ -273,12 +276,19 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 		if s[i] < lower_b or s[i] > upper_b:
 			continue
 		
+		if msa.cons[i] == '.':
+			continue
+
 		for j in range(i+5, msa.length):
 			
 			if s[j] < lower_b or s[j] > upper_b:
 				continue
 
+			if msa.cons[j] == '.':
+				continue
+
 			coupling = one_body_potentials(msa.column(i), msa.column(j))
+			#print(coupling)
 			if coupling is None:
 				continue
 
@@ -301,6 +311,19 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 			
 			distances[(i,j)] = dis
 			mij[(i,j)] = mutual[(i,j)]
+
+			"""
+			if coupling > 7:
+				print()
+				print(coupling)
+				print(i,j)
+				print(dis)
+				print(mutual[(i,j)])
+				print(' '.join(msa.column(i)[:50]))
+				print(' '.join(msa.column(j)[:50]))
+				print()
+			"""
+
 	
 	avg_mutual = np.mean(np.array(list(mij.values())))
 	std_mutual = np.std(np.array(list(mij.values())))
@@ -314,14 +337,15 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 	mean_cij  = np.mean(np.array(list(cij_scores.values())))
 	std_cij   = np.std(np.array(list(cij_scores.values())))
 	norm_cijs = {k:((v - mean_cij) / std_cij) for k,v in cij_scores.items()}
-
+	#print(mean_cij, std_cij)
+	#sys.exit()
 	sum_zscores = {k:(mutual_norm[k] + norm_distances[k] + norm_cijs[k]) for k in norm_cijs.keys()}
 
 	imapper = index_mapper(msa.lids[0], msa.seqs[0])
 	for k,v in sorted(sum_zscores.items(), key = lambda x: x[1]):
 		try:
 			l = (imapper[int(k[0])], imapper[int(k[1])])
-			print(f"pair: {l} sum of z-scores: {v:.4f} m_ij: {mij[k]:.4f} d_ij: {distances[k]:.4f} c_ij: {cij_scores[k]:.4f}")
+			print(f"pair: {l} sum of z-scores: {v:.4f} m_ij: {mutual_norm[k]:.4f} d_ij: {norm_distances[k]:.4f} c_ij: {norm_cijs[k]:.4f}")
 		except:
 			continue
 
