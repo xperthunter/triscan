@@ -93,7 +93,9 @@ def one_body_potentials(col1, col2):
 	for ei, ej in zip(col1, col2):
 		cij = 0
 		if ei in norm_kd and ej in norm_kd:
-			cij = norm_kd[ei]*norm_kd[ej] + 0.1*norm_pI[ei]*norm_pI[ej]
+			#cij = norm_kd[ei]*norm_kd[ej] + 0.1*norm_pI[ei]*norm_pI[ej]
+			#cij = norm_kd[ei] + norm_kd[ej]
+			cij = norm_kd[ei]*norm_kd[ej]
 			cijs.append(cij)
 
 	if len(cijs) == 0:
@@ -101,8 +103,8 @@ def one_body_potentials(col1, col2):
 
 	cijs = np.array(cijs)
 
-	snr = abs(np.mean(cijs) / np.std(cijs))
-
+	#snr = abs(np.mean(cijs) / np.std(cijs))
+	snr = np.mean(cijs)
 	return snr
 
 
