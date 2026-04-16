@@ -5,6 +5,7 @@ CC = gcc
 CFLAGS = -O -Wall -Werror
 
 # compiler flags and timings
+# Linux-x86-VM
 # opt   user  sys
 # none  58.02 43.84
 # -O    18.33 10.53
