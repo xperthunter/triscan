@@ -2,7 +2,7 @@
 
 LIB = -lm -lz
 CC = gcc
-CFLAGS = -O3 -Wall -Werror
+CFLAGS = -O -Wall -Werror
 
 # compiler flags and timings
 # opt   user  sys
