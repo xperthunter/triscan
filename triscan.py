@@ -5,6 +5,7 @@ import json
 import math
 import sys
 
+import cppyy
 import numpy as np
 import scipy.stats
 
@@ -15,7 +16,7 @@ q = [
 	'G','H','I','K','L',
 	'M','N','P','Q','R',
 	'S','T','V','W','Y',
-	'.','-','X','i'
+	'.'
 ]
 
 kd_scale = {
@@ -66,7 +67,6 @@ pI = {
 
 norm_kd = {k:v/4.5 for k,v in kd_scale.items()}
 norm_pI = {k:v/10.76 for k,v in pI.items()}
-
 q_squared = list(product(q, q))
 
 
@@ -157,11 +157,13 @@ def f_i(msa, ma_scores, ll):
 	fi = dict()
 	
 	for i in range(msa.length):
+		if msa.cons[i] == '.': continue
 		fi[i] = {aa: ((ll*meff) / len(q)) for aa in q}
 		
 		col = msa.column(i)
 		
 		for n, elm in enumerate(col):
+			if elm not in q: continue
 			fi[i][elm] += 1 / ma_scores[n]
 		
 		for k in fi[i].keys(): fi[i][k] = fi[i][k] * (1 / ((1+ll)*meff))
@@ -175,18 +177,21 @@ def f_ij(msa, ma_scores, ll):
 	fij = dict()
 	
 	for i in range(msa.length):
+		if msa.cons[i] == '.': continue
 		for j in range(i+1, msa.length):
+			if msa.cons[j] == '.': continue
 			fij[(i,j)] = {pair: (ll*meff) / len(q_squared) for pair in q_squared}
 		
 			col_i = msa.column(i)
 			col_j = msa.column(j)
 		
 			for n, (ei, ej) in enumerate(zip(col_i, col_j)):
+				if ei not in q or ej not in q: continue
 				fij[(i,j)][(ei,ej)] += 1 / ma_scores[n]
 			
 			for k in fij[(i,j)].keys(): fij[(i,j)][k] = fij[(i,j)][k] * (1 / ((1+ll)*meff))
 	
-	return fij	
+	return fij
 	
 
 def mutual_information_ij(f1, f2):
@@ -210,23 +215,18 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 	print(msa.accession)
 	print(f"num of seqs: {len(msa.seqs)}")
 	print(f"msa width: {len(msa.seqs[0])}")
-	#print(msa.cons)
-	#print(msa.cons[30], msa.cons[43])
-	#sys.exit()
 
 	# Set-up Mutual Information Calculation
-	max_similarity = 0.8
-	ma = make_ma(msa.seqs, max_similarity)
+	max_similarity = 0.7
+	L = len(msa.seqs[0])
+	mismatch_max = math.ceil(L * (1 - max_similarity))
+	results = np.zeros(msa.depth, dtype=np.int32)
+	cppyy.gbl.get_ma(msa.seqs, msa.depth, mismatch_max, results)
+	ma = {k:v for k, v in enumerate(results)}
 	meff = m_eff(ma)
-	
-	#print(json.dumps(ma,indent=2))
 
 	print(f"m_eff: {meff:.2f} # of seqs: {len(msa.seqs)}")
 	print(f"msa width: {len(msa.seqs[0])}")
-
-	#sys.exit()
-
-	ma = {k:len(msa.seqs) for k in range(len(msa.seqs))}
 
 	# Compute Single Point Correlations -- amino acid preferences per column
 	single_corr = f_i(msa, ma, 1.25) # msa obj, seq. sim scaling, pseudo-counts
@@ -237,11 +237,19 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 	# Mutual information -- info. gain when assuming two columns occur together, versus separate
 	mutual = mutual_information_ij(single_corr, two_corr)
 	
+	# Display mutual
+	#for k,v in sorted(mutual.items(), key=lambda x: x[1], reverse=False):
+	#	print(k,v, msa.cons[k[0]], msa.cons[k[1]])
+	#
+	#sys.exit()
+	
+	
 	# gather column frequencies
 	col_aafreqs = []
 	aafreqs     = []
 	col_freqs   = []
 	for i in range(msa.length):
+		if msa.cons[i] == '.': continue
 		c = msa.column(i)
 		aafreqs = {}
 		for aa in c:
@@ -282,7 +290,8 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 			continue
 
 		for j in range(i+5, msa.length):
-			
+			if msa.cons[j] == '.': continue
+			if j not in s: continue
 			if s[j] < lower_b or s[j] > upper_b:
 				continue
 
@@ -343,13 +352,13 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 	#sys.exit()
 	sum_zscores = {k:(mutual_norm[k] + norm_distances[k] + norm_cijs[k]) for k in norm_cijs.keys()}
 
-	imapper = index_mapper(msa.lids[0], msa.seqs[0])
+	#imapper = index_mapper(msa.lids[0], msa.seqs[0])
 	for k,v in sorted(sum_zscores.items(), key = lambda x: x[1]):
-		try:
-			l = (imapper[int(k[0])], imapper[int(k[1])])
-			print(f"pair: {l} sum of z-scores: {v:.4f} m_ij: {mutual_norm[k]:.4f} d_ij: {norm_distances[k]:.4f} c_ij: {norm_cijs[k]:.4f}")
-		except:
-			continue
+		#try:
+		#l = (msa.resindices[0][int(k[0])], msa.resindices[0][int(k[1])])
+		print(f"pair: {k} sum of z-scores: {v:.4f} m_ij: {mutual_norm[k]:.4f} d_ij: {norm_distances[k]:.4f} c_ij: {norm_cijs[k]:.4f}")
+		#except:
+		#	continue
 
 	mutual_norm    = {k:v for k,v in sorted(mutual_norm.items(), key=lambda x: x[1])}
 	norm_distances = {k:norm_distances[k] for k in mutual_norm.keys()}
