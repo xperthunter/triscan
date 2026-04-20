@@ -218,7 +218,8 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 
 	# Set-up Mutual Information Calculation
 	max_similarity = 0.7
-	L = len(msa.seqs[0])
+	gap_count = msa.cons.count('.')
+	L = len(msa.seqs[0]) - gap_count
 	mismatch_max = math.ceil(L * (1 - max_similarity))
 	results = np.zeros(msa.depth, dtype=np.int32)
 	cppyy.gbl.get_ma(msa.seqs, msa.depth, mismatch_max, results)
