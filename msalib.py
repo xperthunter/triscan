@@ -3,6 +3,7 @@ import math
 import statistics
 import sys
 
+
 AA = { # Amino Acid Frequencies (from Pfam 38.1)
 	'A': 0.0846,
 	'C': 0.0140,
@@ -25,6 +26,7 @@ AA = { # Amino Acid Frequencies (from Pfam 38.1)
 	'W': 0.0142,
 	'Y': 0.0325,
 }
+
 
 B62 = { # BLOSUM62 scoring matrix
 	'A':{'A':4,'R':-1,'N':-2,'D':-2,'C':0,'Q':-1,'E':-1,'G':0,'H':-2,'I':-1,'L':-1,'K':-1,'M':-1,'F':-2,'P':-1,'S':1,'T':0,'W':-3,'Y':-2,'V':0},
@@ -55,6 +57,7 @@ def get_fp(filename):
 	elif filename == '-':          return sys.stdin
 	else:                          return open(filename)
 
+
 def read_fasta(filename):
 	"""Simple fasta file iterator: yields defline, seq"""
 	name = None
@@ -77,6 +80,7 @@ def read_fasta(filename):
 	yield name, ''.join(seqs)
 	fp.close()
 
+
 class MSA:
 	"""Simple class for MSAs (coming from Pfam seeds)"""
 	def __init__(self, lines):
@@ -88,12 +92,16 @@ class MSA:
 		self.depth = None
 		self.uids = []         # short identifier
 		self.lids = []         # long identifier (shows subsequence)
+		self.sub_seqs = []
 		self.seqs = []
+		self.uid_index = {}
+		self.lid_index = {}
 		self.cons = None       # Probably not useful
 		self.resindices = dict()
-		
+
 		if not lines[0].startswith('# STOCKHOLM 1.0'):
 			sys.exit('MSA constructor error')
+
 		for line in lines[1:]:
 			if line.startswith('#=GF'):
 				tag = line[5:7]
@@ -106,9 +114,10 @@ class MSA:
 			elif line.startswith('#=GS'):
 				foo, lid, ac, uid = line.split()
 				self.uids.append(uid)
+				self.lids.append(lid)
 				ll = lid.split('/')[-1].split('-')
 				ll = [int(l) for l in ll]
-				self.lids.append(tuple(ll))
+				self.sub_seqs.append(tuple(ll))
 			elif line.startswith('#=GC'):
 				self.cons = line.split()[2]
 			elif line.startswith('#'):
@@ -122,15 +131,18 @@ class MSA:
 		self.length = len(self.seqs[0])
 		self.depth = len(self.seqs)
 		
-		for k, (lid, seq) in enumerate(zip(self.lids, self.seqs)):
-			beg, end = lid
+		for k, (ends, lid, uid, seq) in enumerate(zip(self.sub_seqs, .lids, self.uids, self.seqs)):
+
+			self.seq_by_uid[uid] = seq
+			self.seq_by_lid[lid] = seq
+
+			beg, end = ends
 			
 			j = 0
 			self.resindices[k] = dict()
 			for i, sym in enumerate(seq):
-				if sym == '.' or sym == '-':
-					continue
-				
+				if sym.upper() not in AA: continue
+
 				j += 1
 				self.resindices[k][i] = beg + j - 1
 
@@ -165,6 +177,7 @@ def read_stockholm(filename):
 			lines.append(line.rstrip())
 	fp.close()
 
+
 def column_discretizer(col):
 	gap_count = col.count('-')
 	if gap_count / len(col) > 0.5: return 9 # gap code
@@ -181,6 +194,7 @@ def column_discretizer(col):
 	if x < -2: x = -2
 	if x > 6: x = 6
 	return x + 2
+
 
 #############
 ## C area ##
