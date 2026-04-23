@@ -216,13 +216,15 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 	print(f"num of seqs: {len(msa.seqs)}")
 	print(f"msa width: {len(msa.seqs[0])}")
 
-	# Set-up Mutual Information Calculation
+	# Compute Mutual Information
 	max_similarity = 0.7
-	gap_count = msa.cons.count('.')
-	L = len(msa.seqs[0]) - gap_count
-	mismatch_max = math.ceil(L * (1 - max_similarity))
+	#gap_count = msa.cons.count('.')
+	#L = len(msa.seqs[0]) - gap_count
+	#mismatch_max = math.ceil(L * (1 - max_similarity))
 	results = np.zeros(msa.depth, dtype=np.int32)
-	cppyy.gbl.get_ma(msa.seqs, msa.depth, mismatch_max, results)
+	lens = np.array(msa.lens, dtype=np.intc)
+	cppyy.gbl.get_ma(msa.seqs, lens, msa.depth, max_similarity, results)
+	#cppyy.gbl.get_ma(msa.seqs, msa.lens, msa.depth, max_similarity, results)
 	ma = {k:v for k, v in enumerate(results)}
 	meff = m_eff(ma)
 
@@ -294,9 +296,6 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 			if msa.cons[j] == '.': continue
 			if j not in s: continue
 			if s[j] < lower_b or s[j] > upper_b:
-				continue
-
-			if msa.cons[j] == '.':
 				continue
 
 			coupling = one_body_potentials(msa.column(i), msa.column(j))

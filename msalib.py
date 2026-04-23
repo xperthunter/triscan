@@ -94,6 +94,7 @@ class MSA:
 		self.lids = []         # long identifier (shows subsequence)
 		self.sub_seqs = []
 		self.seqs = []
+		self.lens = []
 		self.uid_index = {}
 		self.lid_index = {}
 		self.cons = None       # Probably not useful
@@ -118,6 +119,9 @@ class MSA:
 				ll = lid.split('/')[-1].split('-')
 				ll = [int(l) for l in ll]
 				self.sub_seqs.append(tuple(ll))
+				seqlen = ll[1] - ll[0]
+				assert(seqlen > 0)
+				self.lens.append(seqlen)
 			elif line.startswith('#=GC'):
 				self.cons = line.split()[2]
 			elif line.startswith('#'):
@@ -131,10 +135,9 @@ class MSA:
 		self.length = len(self.seqs[0])
 		self.depth = len(self.seqs)
 		
-		for k, (ends, lid, uid, seq) in enumerate(zip(self.sub_seqs, .lids, self.uids, self.seqs)):
-
-			self.seq_by_uid[uid] = seq
-			self.seq_by_lid[lid] = seq
+		for k, (ends, lid, uid, seq) in enumerate(zip(self.sub_seqs, self.lids, self.uids, self.seqs)):
+			self.uid_index[uid] = seq
+			self.lid_index[lid] = seq
 
 			beg, end = ends
 			
@@ -145,6 +148,7 @@ class MSA:
 
 				j += 1
 				self.resindices[k][i] = beg + j - 1
+
 
 	def write(self, fp):
 		print('# STOCKHOLM 1.0', file=fp)
@@ -157,6 +161,7 @@ class MSA:
 		for lid, seq in zip(self.lids, self.seqs):
 			print(lid, seq, sep='\t', file=fp)
 		print('//', file=fp)
+
 
 	def column(self, n):
 		letters = []
@@ -208,18 +213,22 @@ extern "C" {
 #include <string.h>
 #include <stdio.h>
 
-void get_ma(char **seqs, int size, int max_mismatch, int *results) {
+void get_ma(char **seqs, int *lens, int size, float max_similarity, int *results) {
+	int max_mismatch = 0;
 	for (int i = 0; i < size; i++) {
+		char *s1 = seqs[i];
+		int slen = strlen(s1);
 		results[i] = 1;
+		max_mismatch = (int) (lens[i] * (1 - max_similarity) + 1.0);
 		for (int j = 0; j < size; j++) {
 			if (i == j) continue;
-			char *s1 = seqs[i];
 			char *s2 = seqs[j];
-			int slen = strlen(s1);
 			int mismatch = 0;
 			for (int k = 0; k < slen; k++){
-				//if (s1[k] == '.') continue;
-				//if (s2[k] == '.') continue;
+				if (s1[k] == '.') continue;
+				if (s1[k] == '-') continue;
+				if (s2[k] == '.') continue;
+				if (s2[k] == '-') continue;
 				if (s1[k] != s2[k]) mismatch++;
 				if (mismatch >= max_mismatch) break;
 			}
@@ -271,21 +280,20 @@ if __name__ == '__main__':
 	arg = parser.parse_args();
 	for msa in read_stockholm(arg.stockholm):
 		print(msa.accession, msa.depth, msa.description)
-		results = np.zeros(msa.depth, dtype=np.float32)
-		cppyy.gbl.get_similarities(msa.seqs, msa.depth, results)
-		for uid, dis in zip(msa.uids, results):
-			if arg.verbose: print(uid, dis)
+		# results = np.zeros(msa.depth, dtype=np.float32)
+		# cppyy.gbl.get_similarities(msa.seqs, msa.depth, results)
+		# for uid, dis in zip(msa.uids, results):
+		# 	if arg.verbose: print(uid, dis)
 		
 		# sequence identity clustering
-		id_threshold = 0.7
-		gap_count = msa.cons.count('.')
-		L = len(msa.seqs[0]) - gap_count
-		mismatch_max = math.ceil(L * (1 - id_threshold))
-		print(mismatch_max)
+		id_threshold = float(0.7)
+		results = np.zeros(msa.depth, dtype=np.intc)
+		#L = len(msa.seqs[0]) - msa.cons.count('.')
+		#lens = [L for i in range(msa.depth)]
+		#lens = np.array(lens, dtype=np.intc)
+		lens = np.array(msa.lens, dtype=np.intc)
+		cppyy.gbl.get_ma(msa.seqs, lens, msa.depth, id_threshold, results)
 		#sys.exit()
-		results = np.zeros(msa.depth, dtype=np.int32)
-		cppyy.gbl.get_ma(msa.seqs, msa.depth, mismatch_max, results)
-		
 		M_eff = 0
 		for seq, sims in zip(msa.seqs, results):
 			#print("\n"+seq)
@@ -294,3 +302,4 @@ if __name__ == '__main__':
 			M_eff += 1/sims
 		
 		print(f"M_eff: {M_eff:.2f}")
+		sys.exit()
