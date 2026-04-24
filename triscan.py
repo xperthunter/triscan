@@ -5,7 +5,7 @@ import json
 import math
 import sys
 
-import biopython
+#import biopython
 import cppyy
 import numpy as np
 import scipy.stats
@@ -175,6 +175,7 @@ def f_i(msa, ma_scores, ll):
 def f_ij(msa, ma_scores, ll):
 	
 	meff = m_eff(ma_scores)
+	ll_rescaled = (ll**2 / (1 + 2* ll)) * meff
 	fij = dict()
 	
 	for i in range(msa.length):
@@ -182,15 +183,18 @@ def f_ij(msa, ma_scores, ll):
 		for j in range(i+1, msa.length):
 			if msa.cons[j] == '.': continue
 			fij[(i,j)] = {pair: (ll*meff) / len(q_squared) for pair in q_squared}
-		
+
+			#fij[(i,j)] = dict()
+
 			col_i = msa.column(i)
 			col_j = msa.column(j)
 		
 			for n, (ei, ej) in enumerate(zip(col_i, col_j)):
 				if ei not in q or ej not in q: continue
+				#if (ei,ej) not in fij[(i,j)]: fij[(i,j)][(ei,ej)] = ll_rescaled / (len(q_squared))
 				fij[(i,j)][(ei,ej)] += 1 / ma_scores[n]
 			
-			for k in fij[(i,j)].keys(): fij[(i,j)][k] = fij[(i,j)][k] * (1 / ((1+ll)*meff))
+			for k in fij[(i,j)].keys(): fij[(i,j)][k] = fij[(i,j)][k] / (meff + ll_rescaled)
 	
 	return fij
 	
@@ -202,6 +206,7 @@ def mutual_information_ij(f1, f2):
 	for (i,j) in f2.keys():
 		info = 0
 		
+		#for (ai, aj) in f2[(i,j)].keys():
 		for (ai, aj) in q_squared:
 			info += f2[(i,j)][(ai,aj)] * math.log2(f2[(i,j)][(ai,aj)] / (f1[i][ai] * f1[j][aj]))
 		
@@ -218,7 +223,7 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 	print(f"msa width: {len(msa.seqs[0])}")
 
 	# Compute Mutual Information
-	max_similarity = 0.7
+	max_similarity = 0.8
 	#gap_count = msa.cons.count('.')
 	#L = len(msa.seqs[0]) - gap_count
 	#mismatch_max = math.ceil(L * (1 - max_similarity))
@@ -242,10 +247,10 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 	mutual = mutual_information_ij(single_corr, two_corr)
 	
 	# Display mutual
-	#for k,v in sorted(mutual.items(), key=lambda x: x[1], reverse=False):
-	#	print(k,v, msa.cons[k[0]], msa.cons[k[1]])
-	#
-	#sys.exit()
+	for k,v in sorted(mutual.items(), key=lambda x: x[1], reverse=False):
+		print(k,v, msa.cons[k[0]], msa.cons[k[1]])
+
+	sys.exit()
 	
 	
 	# gather column frequencies
