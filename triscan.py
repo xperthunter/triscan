@@ -5,7 +5,8 @@ import json
 import math
 import sys
 
-#import biopython
+from Bio.PDB import PDBParser
+from Bio.PDB.Polypeptide import protein_letters_3to1 as three_to_one
 import cppyy
 import numpy as np
 import scipy.stats
@@ -71,24 +72,6 @@ norm_pI = {k:v/10.76 for k,v in pI.items()}
 q_squared = list(product(q, q))
 
 
-def index_mapper(lid, seq):
-
-	lid_info = lid.split('/')
-	ends = lid_info[-1].split('-')
-
-	beg, end = int(ends[0]), int(ends[1])
-
-	j = 0
-	mapper = {}
-	for i, sym in enumerate(seq):
-		if sym == '.':
-			continue
-		j += 1
-		mapper[int(i)] = beg + j - 1
-
-	return mapper
-
-
 def one_body_potentials(col1, col2):
 	cijs = []
 	for ei, ej in zip(col1, col2):
@@ -152,69 +135,125 @@ def m_a(seq_i, seqs, cutoff):
 	return m_a
 
 
-def f_i(msa, ma_scores, ll):
+def f_i(msa, ma_scores, ll, rescaled=True):
 	
 	meff = m_eff(ma_scores)
 	fi = dict()
 	
 	for i in range(msa.length):
 		if msa.cons[i] == '.': continue
-		fi[i] = {aa: ((ll*meff) / len(q)) for aa in q}
 		
+		if rescaled:
+			fi[i] = dict()
+		else:
+			fi[i] = {aa: ((ll*meff) / len(q)) for aa in q}
+			
 		col = msa.column(i)
 		
 		for n, elm in enumerate(col):
-			if elm not in q: continue
+			if elm == '-': elm = '.';
+			if elm.upper() not in q: continue
+			if rescaled:
+				if elm not in fi[i]: fi[i][elm] = (ll*meff) / len(q)
+			
 			fi[i][elm] += 1 / ma_scores[n]
 		
-		for k in fi[i].keys(): fi[i][k] = fi[i][k] * (1 / ((1+ll)*meff))
+		for k in fi[i].keys(): fi[i][k] = fi[i][k] / ((1+ll)*meff)
 	
 	return fi
 
 
-def f_ij(msa, ma_scores, ll):
+def f_ij(msa, ma_scores, ll, rescaled=True):
 	
 	meff = m_eff(ma_scores)
-	ll_rescaled = (ll**2 / (1 + 2* ll)) * meff
+	ll_rescaled = (ll**2 / (1.0 + (2.0*ll))) * meff
 	fij = dict()
 	
 	for i in range(msa.length):
 		if msa.cons[i] == '.': continue
 		for j in range(i+1, msa.length):
 			if msa.cons[j] == '.': continue
-			fij[(i,j)] = {pair: (ll*meff) / len(q_squared) for pair in q_squared}
-
-			#fij[(i,j)] = dict()
+			
+			if rescaled:
+				fij[(i,j)] = dict()
+			else:
+				fij[(i,j)] = {pair: (ll*meff) / len(q_squared) for pair in q_squared}
 
 			col_i = msa.column(i)
 			col_j = msa.column(j)
 		
 			for n, (ei, ej) in enumerate(zip(col_i, col_j)):
+				if ei == '-': ei = '.'
+				if ej == '-': ej = '.'
 				if ei not in q or ej not in q: continue
-				#if (ei,ej) not in fij[(i,j)]: fij[(i,j)][(ei,ej)] = ll_rescaled / (len(q_squared))
+				if rescaled:
+					if (ei,ej) not in fij[(i,j)]:
+						fij[(i,j)][(ei,ej)] = ll_rescaled / len(q_squared)
+				
 				fij[(i,j)][(ei,ej)] += 1 / ma_scores[n]
 			
-			for k in fij[(i,j)].keys(): fij[(i,j)][k] = fij[(i,j)][k] / (meff + ll_rescaled)
+			for k in fij[(i,j)].keys():
+				if rescaled:
+					fij[(i,j)][k] = fij[(i,j)][k] / (meff + ll_rescaled)
+				else:
+					fij[(i,j)][k] = fij[(i,j)][k] / (meff + ll)
 	
 	return fij
 	
 
-def mutual_information_ij(f1, f2):
+def mutual_information_ij(f1, f2, meff, ll, rescaled=True):
 	
 	mutual = dict()
 	
 	for (i,j) in f2.keys():
-		info = 0
 		
-		#for (ai, aj) in f2[(i,j)].keys():
-		for (ai, aj) in q_squared:
-			info += f2[(i,j)][(ai,aj)] * math.log2(f2[(i,j)][(ai,aj)] / (f1[i][ai] * f1[j][aj]))
+		info = 0
+		if rescaled:
+			l_rescaled = ll**2 / (1.0 + (2.0*ll))
+			psuedo_ij = l_rescaled / (len(q_squared) * (1 + l_rescaled))
+			psuedo_i  = ll / (len(q) * (1+ll))
+			for (ai,aj) in q_squared:
+				if (ai,aj) not in f2[(i,j)]:
+					if ai in f1[i] and aj not in f1[j]:
+						info += psuedo_ij * math.log2(psuedo_ij / (f1[i][ai] * psuedo_i))
+					elif ai not in f1[i] and aj in f1[j]:
+						info += psuedo_ij * math.log2(psuedo_ij / psuedo_i * f1[j][aj])
+					else:
+						score = psuedo_ij / (psuedo_i ** 2)
+						assert(math.isclose(score, 1.0))
+				else:
+					info += f2[(i,j)][(ai,aj)] * math.log2(f2[(i,j)][(ai,aj)] / (f1[i][ai] * f1[j][aj]))
+		else:
+			for (ai, aj) in q_squared:
+				info += f2[(i,j)][(ai,aj)] * math.log2(f2[(i,j)][(ai,aj)] / (f1[i][ai] * f1[j][aj]))
 		
 		mutual[(i,j)] = info
 	
 	return mutual
 
 
+def test_contact(pdb, msa_ind, seq_ind, seq, cutoff=8.0):
+	
+	id1, id2 = msa_ind
+	res1, res2 = seq_ind
+	aa1 = seq[id1]
+	aa2 = seq[id2]
+	
+	if aa1.upper() not in q and aa2.upper() not in q:
+		return None
+	
+	assert(aa1 == three_to_one[pdb[0]["A"][res1].get_resname()])
+	assert(aa2 == three_to_one[pdb[0]["A"][res2].get_resname()])
+	
+	for atom1 in pdb[0]["A"][res1].get_atoms():
+		for atom2 in pdb[0]["A"][res2].get_atoms():
+			dis = atom1 - atom2
+			if dis < cutoff:
+				return True
+	
+	return False
+
+	
 counter = 0
 for msa in msalib.read_stockholm(sys.argv[1]):
 	print(msa.identifier)
@@ -222,37 +261,58 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 	print(f"num of seqs: {len(msa.seqs)}")
 	print(f"msa width: {len(msa.seqs[0])}")
 
-	# Compute Mutual Information
+	# Compute sequence similarlity scores
 	max_similarity = 0.8
-	#gap_count = msa.cons.count('.')
-	#L = len(msa.seqs[0]) - gap_count
-	#mismatch_max = math.ceil(L * (1 - max_similarity))
-	results = np.zeros(msa.depth, dtype=np.int32)
+	results = np.zeros(msa.depth, dtype=np.intc)
 	lens = np.array(msa.lens, dtype=np.intc)
 	cppyy.gbl.get_ma(msa.seqs, lens, msa.depth, max_similarity, results)
-	#cppyy.gbl.get_ma(msa.seqs, msa.lens, msa.depth, max_similarity, results)
 	ma = {k:v for k, v in enumerate(results)}
 	meff = m_eff(ma)
 
 	print(f"m_eff: {meff:.2f} # of seqs: {len(msa.seqs)}")
-	print(f"msa width: {len(msa.seqs[0])}")
 
 	# Compute Single Point Correlations -- amino acid preferences per column
-	single_corr = f_i(msa, ma, 1.25) # msa obj, seq. sim scaling, pseudo-counts
+	single_corr = f_i(msa, ma, 0.1, rescaled=True)
 	
 	# Compute Two Point Correlations -- how often does aa_A and aa_B appear in columns i,j
-	two_corr = f_ij(msa, ma, 1.25)
+	two_corr = f_ij(msa, ma, 0.1, rescaled=True)
 	
 	# Mutual information -- info. gain when assuming two columns occur together, versus separate
-	mutual = mutual_information_ij(single_corr, two_corr)
+	mutual = mutual_information_ij(single_corr, two_corr, meff, 0.1, rescaled=True)
 	
-	# Display mutual
-	for k,v in sorted(mutual.items(), key=lambda x: x[1], reverse=False):
-		print(k,v, msa.cons[k[0]], msa.cons[k[1]])
-
+	# measure the accuracy with just mutual information
+	test_id = "A0A0D2IQE1.1"
+	test_index = msa.uid_index[test_id]
+	parser = PDBParser(PERMISSIVE=1)
+	structure = parser.get_structure("test", sys.argv[2])
+	
+	acc = {}
+	measures = 0
+	for rank, (k,v) in enumerate(sorted(mutual.items(), key = lambda x: x[1], reverse=True)):
+		l = (msa.resindices[test_index][int(k[0])], msa.resindices[test_index][int(k[1])])
+		if l[1] - l[0] < 4: continue
+		
+		contact = test_contact(structure, k, l, msa.seqs[test_index], cutoff=8.0)
+		if contact is not None:
+			if contact:
+				acc[measures] = 1
+			else:
+				acc[measures] = 0
+		
+		print(f"pair: {l} / {k} {msa.cons[k[0]]} {msa.cons[k[1]]} m_ij: {mutual[k]:.4f} contact?: {contact}")
+		measures += 1
+		if measures >= 50: break
+	
+	ranks = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50]
+	for r in ranks:
+		scr = 0
+		for i in range(r):
+			scr += acc[i]
+		
+		scr = scr / r
+		print(f"accuracy @ rank {r}: {scr:.4f}")
+	
 	sys.exit()
-	
-	
 	# gather column frequencies
 	col_aafreqs = []
 	aafreqs     = []
@@ -298,7 +358,7 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 		if msa.cons[i] == '.':
 			continue
 
-		for j in range(i+5, msa.length):
+		for j in range(i+4, msa.length):
 			if msa.cons[j] == '.': continue
 			if j not in s: continue
 			if s[j] < lower_b or s[j] > upper_b:
@@ -329,18 +389,6 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 			distances[(i,j)] = dis
 			mij[(i,j)] = mutual[(i,j)]
 
-			"""
-			if coupling > 7:
-				print()
-				print(coupling)
-				print(i,j)
-				print(dis)
-				print(mutual[(i,j)])
-				print(' '.join(msa.column(i)[:50]))
-				print(' '.join(msa.column(j)[:50]))
-				print()
-			"""
-
 	
 	avg_mutual = np.mean(np.array(list(mij.values())))
 	std_mutual = np.std(np.array(list(mij.values())))
@@ -354,17 +402,45 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 	mean_cij  = np.mean(np.array(list(cij_scores.values())))
 	std_cij   = np.std(np.array(list(cij_scores.values())))
 	norm_cijs = {k:((v - mean_cij) / std_cij) for k,v in cij_scores.items()}
-	#print(mean_cij, std_cij)
-	#sys.exit()
+	
 	sum_zscores = {k:(mutual_norm[k] + norm_distances[k] + norm_cijs[k]) for k in norm_cijs.keys()}
-
+	#sum_zscores = {k:(mutual_norm[k] + norm_cijs[k]) for k in norm_cijs.keys()}
+	
+	test_id = "A0A0D2IQE1.1"
+	test_index = msa.uid_index[test_id]
+	parser = PDBParser(PERMISSIVE=1)
+	structure = parser.get_structure("test", sys.argv[2])
+	
 	#imapper = index_mapper(msa.lids[0], msa.seqs[0])
-	for k,v in sorted(sum_zscores.items(), key = lambda x: x[1]):
-		#try:
-		#l = (msa.resindices[0][int(k[0])], msa.resindices[0][int(k[1])])
-		print(f"pair: {k} sum of z-scores: {v:.4f} m_ij: {mutual_norm[k]:.4f} d_ij: {norm_distances[k]:.4f} c_ij: {norm_cijs[k]:.4f}")
-		#except:
-		#	continue
+	
+	acc = {}
+	for rank, (k,v) in enumerate(sorted(sum_zscores.items(), key = lambda x: x[1], reverse=True)):
+		l = (msa.resindices[test_index][int(k[0])], msa.resindices[test_index][int(k[1])])
+		print(f"pair: {l} sum of z-scores: {v:.4f} m_ij: {mutual_norm[k]:.4f} d_ij: {norm_distances[k]:.4f} c_ij: {norm_cijs[k]:.4f}")
+		
+		
+		contact = test_contact(structure, k, l, msa.seqs[test_index], cutoff=8.0)
+		print(contact)
+		if contact is not None:
+			if contact:
+				acc[rank] = 1
+			else:
+				acc[rank] = 0
+		
+		if rank >= 100: break
+	
+	
+	ranks = [1, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+	print(acc[int(0)])
+	for r in ranks:
+		scr = 0
+		for i in range(r):
+			scr += acc[i]
+		
+		scr = scr / r
+		print(f"accuracy @ rank {r}: {scr:.4f}")
+		
+		
 
 	mutual_norm    = {k:v for k,v in sorted(mutual_norm.items(), key=lambda x: x[1])}
 	norm_distances = {k:norm_distances[k] for k in mutual_norm.keys()}
@@ -384,6 +460,8 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 	print(msa.identifier)
 	print(msa.accession)
 	print(len(msa.seqs[0]))
+	
+	
 
 
 	sys.exit()

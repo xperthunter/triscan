@@ -51,6 +51,7 @@ B62 = { # BLOSUM62 scoring matrix
 	'V':{'A':0,'R':-3,'N':-3,'D':-3,'C':-1,'Q':-2,'E':-2,'G':-3,'H':-3,'I':3,'L':1,'K':-2,'M':1,'F':-1,'P':-2,'S':-2,'T':0,'W':-3,'Y':-1,'V':4},
 }
 
+
 def get_fp(filename):
 	"""Returns a file pointer for reading based on file name"""
 	if   filename.endswith('.gz'): return gzip.open(filename, 'rt')
@@ -136,8 +137,8 @@ class MSA:
 		self.depth = len(self.seqs)
 		
 		for k, (ends, lid, uid, seq) in enumerate(zip(self.sub_seqs, self.lids, self.uids, self.seqs)):
-			self.uid_index[uid] = seq
-			self.lid_index[lid] = seq
+			self.uid_index[uid] = k
+			self.lid_index[lid] = k
 
 			beg, end = ends
 			
