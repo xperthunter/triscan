@@ -171,3 +171,20 @@ I I
 
 https://www.genome.jp/aaindex/
 
+
+
+
+
+
+accuracy @ rank 1: 0.0000
+accuracy @ rank 10: 0.3000
+accuracy @ rank 20: 0.3500
+accuracy @ rank 30: 0.3333
+accuracy @ rank 40: 0.3250
+accuracy @ rank 50: 0.2600
+accuracy @ rank 60: 0.2333
+accuracy @ rank 70: 0.2143
+accuracy @ rank 80: 0.2125
+accuracy @ rank 90: 0.1889
+accuracy @ rank 100: 0.2000
+

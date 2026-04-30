@@ -71,7 +71,6 @@ norm_kd = {k:v/4.5 for k,v in kd_scale.items()}
 norm_pI = {k:v/10.76 for k,v in pI.items()}
 q_squared = list(product(q, q))
 
-
 def one_body_potentials(col1, col2):
 	cijs = []
 	for ei, ej in zip(col1, col2):
@@ -255,6 +254,12 @@ def test_contact(pdb, msa_ind, seq_ind, seq, cutoff=8.0):
 
 	
 counter = 0
+
+pc = float(sys.argv[3])
+rsc = True
+if int(sys.argv[4]) == 1: rsc=True
+else:                     rsc=False
+
 for msa in msalib.read_stockholm(sys.argv[1]):
 	print(msa.identifier)
 	print(msa.accession)
@@ -272,13 +277,13 @@ for msa in msalib.read_stockholm(sys.argv[1]):
 	print(f"m_eff: {meff:.2f} # of seqs: {len(msa.seqs)}")
 
 	# Compute Single Point Correlations -- amino acid preferences per column
-	single_corr = f_i(msa, ma, 0.1, rescaled=True)
+	single_corr = f_i(msa, ma, pc, rescaled=rsc)
 	
 	# Compute Two Point Correlations -- how often does aa_A and aa_B appear in columns i,j
-	two_corr = f_ij(msa, ma, 0.1, rescaled=True)
+	two_corr = f_ij(msa, ma, pc, rescaled=rsc)
 	
 	# Mutual information -- info. gain when assuming two columns occur together, versus separate
-	mutual = mutual_information_ij(single_corr, two_corr, meff, 0.1, rescaled=True)
+	mutual = mutual_information_ij(single_corr, two_corr, meff, pc, rescaled=rsc)
 	
 	# measure the accuracy with just mutual information
 	test_id = "A0A0D2IQE1.1"
