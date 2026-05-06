@@ -1,2 +1,7 @@
-# triscan
-Measure 3-point correlations in MSAs
+# TryScan
+
+Methods in measuring compensatory mutations in protein multiple sequence alignments (MSAs). 
+
+# Background
+
+
