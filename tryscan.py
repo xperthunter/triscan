@@ -54,6 +54,25 @@ class TryScan:
 		self.msa = msa
 	
 	
+	def measure_mij(self, similarity_cutoff=None, psuedo=None)
+		"""
+		measure mutual information for pairs of columns
+		
+		Parameters
+		----------
+		- similarity_cutoff:	`float`, (0,1]
+		- psuedo:				`float`, > 0.0
+		
+		Returns
+		-------
+		- mij:	`dict`, keys cols (i,j) in MSA order, vals mutual information for columns	
+		"""
+		
+		mij = dict()
+		
+		
+	
+	
 	def score_mij(self, similarity_cutoff=None, test_id=None, pdb=None):
 		"""
 		Score agreement between mututal information and structural contacts
@@ -65,18 +84,31 @@ class TryScan:
 		- pdb:					BioPython PDB structure object to use for scoring
 		"""
 		
-		assert (
-			isinstance(similarity_cutoff, float),
-			f"sequence similarity cutoff: {similarity_cutoff} invalid -- `float` required"
-		)
-		assert(
-			similarity_cutoff > 0.0 && similarity_cutoff <= 1.0,
-			f"sequence similarity cutoff: {similarity_cutoff} invalid -- needs to be (0,1]"
-		)
-			
-		assert()
 		
-		test_index = msa.uid_index[test_id]
+		if True:
+			assert (
+				isinstance(similarity_cutoff, float),
+				f"sequence similarity cutoff: {similarity_cutoff} invalid -- `float` required"
+			)
+			assert(
+				similarity_cutoff > 0.0 && similarity_cutoff <= 1.0,
+				f"sequence similarity cutoff: {similarity_cutoff} invalid -- needs to be (0,1]"
+			)	
+			assert(
+				test_id in self.msa.uid_index[test_id],
+				f"test_id `{test_id}` invalid for MSA obj `{msa.description}`"
+			)
+			assert(
+				isinstance(pdb, object),
+				f"unexpected type {type(pdb)} for pdb argument"
+			)
+		
+		self.similarity_cutoff = similarity_cutoff
+		self.test_id = test_id
+		self.pdb = pdb
+		
+		
+		
 	
 	
 	def mutual_information(self, similarity_cutoff=None);
