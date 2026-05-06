@@ -13,90 +13,82 @@ import scipy.stats
 
 import msalib
 
-q = [
-	'A','C','D','E','F',
-	'G','H','I','K','L',
-	'M','N','P','Q','R',
-	'S','T','V','W','Y',
-	'.'
-]
 
-kd_scale = {
-	"I":4.5,
-	"V":4.2,
-	"L":3.8,
-	"F":2.8,
-	"C":2.5,
-	"M":1.9,
-	"A":1.8,
-	"G":-0.4,
-	"T":-0.7,
-	"S":-0.8,
-	"W":-0.9,
-	"Y":-1.3,
-	"P":-1.6,
-	"H":-3.2,
-	"E":-3.5,
-	"Q":-3.5,
-	"D":-3.5,
-	"N":-3.5,
-	"K":-3.9,
-	"R":-4.5
-}
-
-pI = {
-	"I":6.02,
-	"A":6.00,
-	"L":5.98,
-	"R":10.76,
-	"K":9.74,
-	"N":5.41,
-	"M":5.74,
-	"D":2.77,
-	"F":5.48,
-	"C":5.05,
-	"P":6.30,
-	"Q":5.65,
-	"S":5.68,
-	"E":3.22,
-	"T":5.66,
-	"G":5.97,
-	"W":5.89,
-	"H":7.59,
-	"Y":5.66,
-	"V":5.96
-}
-
-norm_kd = {k:v/4.5 for k,v in kd_scale.items()}
-norm_pI = {k:v/10.76 for k,v in pI.items()}
-q_squared = list(product(q, q))
-
-def one_body_potentials(col1, col2):
-	cijs = []
-	for ei, ej in zip(col1, col2):
-		cij = 0
-		if ei in norm_kd and ej in norm_kd:
-			#cij = norm_kd[ei]*norm_kd[ej] + 0.1*norm_pI[ei]*norm_pI[ej]
-			#cij = norm_kd[ei] + norm_kd[ej]
-			cij = norm_kd[ei]*norm_kd[ej]
-			cijs.append(cij)
-
-	if len(cijs) == 0:
-		return None
-
-	cijs = np.array(cijs)
-
-	#snr = abs(np.mean(cijs) / np.std(cijs))
-	snr = np.mean(cijs)
-	return snr
-
-
-def m_eff(similarity_scores):
-	m_eff = 0
-	for v in similarity_scores.values():
-		#print(v)
-		m_eff += 1/v
-	return m_eff
+class TryScan:
+	"""Class definition for scanning MSA columns to locate compensatory mutations"""
+	
+	def __init__(self, msa):
+		"""
+		Initialize TryScan
+		
+		Parameters
+		----------
+		- msa:	give an MSA as an MSA object
+		"""
+		
+		q = [
+			'A','C','D','E','F',
+			'G','H','I','K','L',
+			'M','N','P','Q','R',
+			'S','T','V','W','Y',
+			'.'
+		]
+		self.q  = q
+		self.q2 = list(product(q, q))
+		
+		# input arg checking, redundant in some cases but helpful
+		if True:
+			assert(
+				isinstance(msa, object),
+				f"msa field is of unexpected type: {type(msa)}"
+			)
+			assert(
+				hasattr(msa, "lens"),
+				f"msa object has unexpected fields -- aborting"
+			)
+			assert(
+				hasattr(msa, "col"),
+				f"msa object has unexpected fields -- aborting"
+			)
+		
+		self.msa = msa
+	
+	
+	def score_mij(self, similarity_cutoff=None, test_id=None, pdb=None):
+		"""
+		Score agreement between mututal information and structural contacts
+		
+		Parameters
+		----------
+		- similarity_cutoff:	sequence similarity cutoff to cluster msa sequences
+		- test_id:				id of entry in MSA to base scoring off of
+		- pdb:					BioPython PDB structure object to use for scoring
+		"""
+		
+		assert (
+			isinstance(similarity_cutoff, float),
+			f"sequence similarity cutoff: {similarity_cutoff} invalid -- `float` required"
+		)
+		assert(
+			similarity_cutoff > 0.0 && similarity_cutoff <= 1.0,
+			f"sequence similarity cutoff: {similarity_cutoff} invalid -- needs to be (0,1]"
+		)
+			
+		assert()
+		
+		test_index = msa.uid_index[test_id]
+	
+	
+	def mutual_information(self, similarity_cutoff=None);
+		
+		
+		
+	
+	def set_meff(self):
+		m_eff = 0
+		for v in self.ma.values(): m_eff += 1/v
+		
+		self.meff = meff
 
 
 def make_ma(seqs, cutoff):
