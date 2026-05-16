@@ -1,7 +1,19 @@
+#!/usr/bin/python3
+
 import gzip
+from itertools import product
+import json
 import math
-import statistics
 import sys
+
+from Bio.PDB import PDBParser
+from Bio.PDB.Polypeptide import protein_letters_3to1 as three_to_one
+import cppyy
+import numpy as np
+import scipy.stats
+
+
+DEVMODE = True
 
 
 AA = { # Amino Acid Frequencies (from Pfam 38.1)
@@ -82,9 +94,63 @@ def read_fasta(filename):
 	fp.close()
 
 
+def read_stockholm(filename):
+	"""Stockholm file iterator: yields msa objects"""
+	fp = get_fp(filename)
+	lines = []
+	for line in fp:
+		if line.startswith('//'):
+			yield MSA(lines)
+			lines = []
+		else:
+			lines.append(line.rstrip())
+	fp.close()
+
+
+#############
+## C area ###
+#############
+
+cppyy.cppdef("""
+extern "C" {
+#include <string.h>
+#include <stdio.h>
+
+void get_ma(char **seqs, int *lens, int size, float max_similarity, int *results) {
+	int max_mismatch = 0;
+	for (int i = 0; i < size; i++) {
+		char *s1 = seqs[i];
+		int slen = strlen(s1);
+		results[i] = 1;
+		max_mismatch = (int) (lens[i] * (1 - max_similarity) + 1.0);
+		for (int j = 0; j < size; j++) {
+			if (i == j) continue;
+			char *s2 = seqs[j];
+			int mismatch = 0;
+			for (int k = 0; k < slen; k++){
+				if (s1[k] == '.') continue;
+				if (s1[k] == '-') continue;
+				if (s2[k] == '.') continue;
+				if (s2[k] == '-') continue;
+				if (s1[k] != s2[k]) mismatch++;
+				if (mismatch >= max_mismatch) break;
+			}
+			if (mismatch < max_mismatch) results[i] = results[i] + 1;
+		}
+	}
+}}""")
+
+
 class MSA:
-	"""Simple class for MSAs (coming from Pfam seeds)"""
+	"""
+	Reading MSAs from Pfam families and analyzing amino acid statistics and mutual information
+	Contains method to score agreement between mutual information and representative structures
+	from a a family.
+	"""
 	def __init__(self, lines):
+		"""
+		Initialize a MSA object from an alignment in stockholm format
+		"""
 		self.identifier = None # release identifier
 		self.accession = None  # stable identifier
 		self.description = []  # to be joined later
@@ -98,7 +164,7 @@ class MSA:
 		self.lens = []
 		self.uid_index = {}
 		self.lid_index = {}
-		self.cons = None       # Probably not useful
+		self.cons = None
 		self.resindices = dict()
 
 		if not lines[0].startswith('# STOCKHOLM 1.0'):
@@ -149,9 +215,34 @@ class MSA:
 
 				j += 1
 				self.resindices[k][i] = beg + j - 1
-
-
+		
+		q = [
+			'A','C','D','E','F',
+			'G','H','I','K','L',
+			'M','N','P','Q','R',
+			'S','T','V','W','Y',
+			'.'
+		]
+		self.q  = q
+		self.q2 = list(product(q, q))
+		
+		# initialize object attributes
+		self.neff = None
+		self.ma = None
+		self.fi = None
+		self.fij = None
+		self.similarity_cutoff = None
+		self.psuedo = None
+		self.rescale = None
+		self.mij = None
+		
+		self._pcs = None
+	
+	
 	def write(self, fp):
+		"""
+		Write out MSA in stockholm
+		"""
 		print('# STOCKHOLM 1.0', file=fp)
 		print('#=GF ID', self.identifier, file=fp)
 		print('#=GF AC', self.accession, file=fp)
@@ -162,145 +253,376 @@ class MSA:
 		for lid, seq in zip(self.lids, self.seqs):
 			print(lid, seq, sep='\t', file=fp)
 		print('//', file=fp)
-
-
+	
+	
 	def column(self, n):
+		"""
+		MSA column getter
+		"""
 		letters = []
 		for seq in self.seqs:
 			letters.append(seq[n])
 		return ''.join(letters)
+	
 
+	def _seq_cluster(self):
+		"""
+		internal function to compute sequence clustering
+		calling out to cppyy
+		
+		Sets
+		----
+		ma: `dict`
+			key -> msa member index
+			val -> number of msa members with sequence similarity > similarity_cutoff
+		"""
+		
+		results = np.zeros(self.depth, dtype=np.intc)
+		lens = np.array(self.lens, dtype=np.intc)
+		
+		cppyy.gbl.get_ma(self.seqs, lens, self.depth, self.similarity_cutoff, results)
+		
+		self.ma = {k:v for k, v in enumerate(results)}
+		
+		return
+		
+		
+	def set_neff(self):
+		"""
+		compute N_eff
+		
+		Sets
+		----
+		neff: `float`
+			effective number of sequences
+		"""
+		
+		neff = 0
+		for v in self.ma.values(): neff += 1/v
+		
+		self.neff = neff
+		
+		return
+	
+	
+	def _set_fi(self):
+		"""
+		compute the single column amino acid frequency distribution
+		
+		Sets
+		----
+		fi: `dict`
+			key -> column index
+			val -> `dict` of amino acid frequencies in that column
+		
+		Description
+		-----------
+		`set_fi` is computing amino acid frequency distribution for each separate MSA column.
+		
+		We define f_i(A) as the frequency of observing amino acid *A* in column *i*. This is equal to
+		
+		              1         (   ps    [    M        1                           ]) 
+		f_i(A) = -----------  * (  ---- + [ sum__to   ----- * if(a(i) == A) ? 1 : 0 ])
+		         n_eff  + ps    (   q     [   a=1      m^a                          ])
+		
+		- i     = column number
+		- A     = amino acid letter
+		- n_eff = effective number of sequences given sequence identity threshold
+		- ps    = psuedo counts. psuedo counts are provided from the user as a scaling factor, self.psuedo > 0.
+					the number of psuedo counts add is self.psuedo * n_eff
+		- q     = 21, length of amino acid alphabet + 1 for gap
+		- m^a   = number of sequences with sequence identity >= threshold to sequence `a`
+		- a(i)  = amino acid at sequence a at column i
+		"""
+		
+		assert(self.neff is not None)
+		assert(self._pcs is not None)
+		assert(self.ma   is not None)
+		
+		fi = dict()
+		
+		for i in range(self.length):
+			if self.cons[i] == '.': continue
+			
+			if self.rescale:
+				fi[i] = dict()
+			else:
+				fi[i] = {aa: ((self._pcs) / len(self.q)) for aa in self.q}
+				
+			col = self.column(i)
+			
+			for n, elm in enumerate(col):
+				if elm == '-': elm = '.';
+				if elm.upper() not in self.q: continue
+				if self.rescale:
+					if elm not in fi[i]: fi[i][elm] = (self._pcs) / len(self.q)
+				
+				fi[i][elm] += 1 / self.ma[n]
+			
+			for k in fi[i].keys(): fi[i][k] = fi[i][k] / (self.neff + self._pcs)
+		
+		self.fi = fi
+		return
+	
+	
+	def _rescaled_counts(self):
+		"""
+		compute the rescaled psuedo counts
+		
+		Returns
+		-------
+		`float`: rescaled psuedo counts given current pseudo count value and neff
+		
+		Description
+		-----------
+		`_rescaled_counts` computes the necessary amount of psuedo counts needs such that:
+		
+		              f_ij(A,B)
+		          --------------- = 1
+		          f_i(A) * f_j(B)
+			
+			when there are no observations for amino acids A,B in columns i,j
+			
+		Given equations for f_i(A) and f_ij(A, B), the equation for rescaled psuedo counts is:
+		
+		                   self.psuedo ** 2
+		rescaled_counts = -------------------  * n_eff
+					      1 + 2 * self.psuedo
+		
+		Dervivation of this relation is provided in the README
+		"""
+		assert(self.neff is not None)
+		assert(self._pcs is not None)
+		assert(self.ma   is not None)
+		
+		return (self.psuedo**2 / (1.0 + (2.0*self.psuedo))) * self.neff
+	
+	
+	def _set_fij(self):
+		"""
+		compute the pairwise column amino acid frequeny distribution
+		
+		Sets
+		----
+		fij: `dict`
+			key -> `tuple` ordered pair column indices, non-redundant ordered pairs
+			val -> `dict` of amino acid tuples frequencies
+		
+		Description
+		-----------
+		`set_fij` is computing amino acid frequency distribution for non-redundant MSA column pairs.
+		
+		We define f_ij(A,B) as the frequency of observing amino acid pair *A* and *B* in column *i* and column *j*.
+		This is equal to:
+		
+		              1         (   ps    [    M        1                                         ]) 
+		f_i(A) = -----------  * (  ---- + [ sum__to   ----- * if(a(i) == A and a(j) == B) ? 1 : 0 ])
+		         n_eff  + ps    (  q**2   [   a=1      m^a                                        ])
+		
+		- i     = column number
+		- A,B   = amino acid letter
+		- n_eff = effective number of sequences given sequence identity threshold
+		- ps    = psuedo counts. psuedo counts are provided from the user as a scaling factor, self.psuedo > 0.
+					the number of psuedo counts added is self.psuedo * n_eff
+		- q     = 21, length of amino acid alphabet + 1 for gap
+		- m^a   = number of sequences with sequence identity >= threshold to sequence `a`
+		- a(i)  = amino acid at sequence a at column i		
+		"""
+		
+		assert(self.neff is not None)
+		assert(self._pcs is not None)
+		assert(self.ma   is not None)
+		
+		fij = dict()
+		
+		if self.rescale:
+			rpcs = self._rescaled_counts()
+		
+		for i in range(self.length):
+			if self.cons[i] == '.': continue
+			for j in range(i+1, self.length):
+				if self.cons[j] == '.': continue
+				
+				if self.rescale:
+					fij[(i,j)] = dict()
+				else:
+					fij[(i,j)] = {pair: (self._pcs) / len(self.q2) for pair in self.q2}
+				
+				col_i = self.column(i)
+				col_j = self.column(j)
+				
+				for n, (ei, ej) in enumerate(zip(col_i, col_j)):
+					if ei == '-': ei = '.'
+					if ej == '-': ej = '.'
+					if ei not in self.q or ej not in self.q: continue
+					if self.rescale:
+						if (ei,ej) not in fij[(i,j)]:
+							fij[(i,j)][(ei,ej)] = rpcs / len(self.q2)
+					
+					fij[(i,j)][(ei,ej)] += 1 / self.ma[n]
+				
+				for k in fij[(i,j)].keys():
+					if self.rescale:
+						fij[(i,j)][k] = fij[(i,j)][k] / (self.neff + rpcs)
+					else:
+						fij[(i,j)][k] = fij[(i,j)][k] / (self.neff + self._pcs)
+		
+		self.fij = fij
+		return
+	
+	
+	def measure_mij(self, similarity_cutoff=0.8, psuedo=1.0, rescale=False):
+		"""
+		measure mutual information for pairs of columns
+		
+		Parameters
+		----------
+		similarity_cutoff: `float`, (0,1]
+			maximum sequence identity for MSA sequence clustering
+		
+		psuedo: `float`, > 0.0
+			parameter controlling how much psuedo counts to add
+			this adds ``psuedo * N_eff `` psuedo counts to f_i and f_ij statistics
+		
+		rescale: `bool`
+			two methods for adding psuedo counts
+			* False : both f_i, f_ij receive same number of psuedo counts
+			* True  : f_i and f_ij receive different number of psuedo counts
+				`rescale` sets ratio of un-observed pairs and column marginals to 1.
+				f_ij / (f_i * f_j) == 1 under rescale
+				* see README for more information
+		
+		Returns
+		-------
+		- mij:	`dict`, keys cols (i,j) in MSA order, vals mutual information for columns	
+		"""
+		
+		# consider a global variable to debug or not, instead of if true
+		# do we want to use raise instead ??
+		if DEVMODE:
+			assert isinstance(similarity_cutoff, float), f"sequence similarity cutoff: {similarity_cutoff} invalid -- `float` required"
+			assert similarity_cutoff > 0.0 and similarity_cutoff <= 1.0, f"sequence similarity cutoff: {similarity_cutoff} invalid -- needs to be (0,1]"
+			assert isinstance(psuedo, float), f"input psuedo scale {psuedo} has unexpected type"
+			assert psuedo > 0.0, f"psuedo count scale cannot be negative"
+			assert isinstance(rescale, bool),f"argument `rescale` is of unexpected type"
+		
+		self.similarity_cutoff = similarity_cutoff
+		self.psuedo = psuedo
+		self.rescale = rescale
+		
+		self._seq_cluster()
+		self.set_neff()
+		
+		self._pcs = self.psuedo * self.neff
+		
+		self._set_fi()
+		self._set_fij()
+		
+		mij = dict()
+		
+		for (i,j) in self.fij.keys():
+			
+			info = 0
+			if self.rescale:
+				
+				l_rescaled = self._rescaled_counts() / self.neff # only want the the rescaled factor
+				psuedo_ij = l_rescaled / (len(self.q2) * (1 + l_rescaled))
+				psuedo_i  = self.psuedo / (len(self.q) * (1+self.psuedo))
+				for (ai,aj) in self.q2:
+					if (ai,aj) not in self.fij[(i,j)]:
+						if ai in self.fi[i] and aj not in self.fi[j]:
+							info += psuedo_ij * math.log2(psuedo_ij / (self.fi[i][ai] * psuedo_i))
+						elif ai not in self.fi[i] and aj in self.fi[j]:
+							info += psuedo_ij * math.log2(psuedo_ij / psuedo_i * self.fi[j][aj])
+						else:
+							score = psuedo_ij / (psuedo_i ** 2)
+							assert(math.isclose(score, 1.0))
+					else:
+						info += self.fij[(i,j)][(ai,aj)] * math.log2(self.fij[(i,j)][(ai,aj)] / (self.fi[i][ai] * self.fi[j][aj]))
+			else:
+				for (ai, aj) in self.q2:
+					info += self.fij[(i,j)][(ai,aj)] * math.log2(self.fij[(i,j)][(ai,aj)] / (self.fi[i][ai] * self.fi[j][aj]))
+			
+			mij[(i,j)] = info
+		
+		self.mij = mij
+		return
+	
+	
+	def _test_contact(self, msa_index, protein_index):
+		id1, id2 = msa_index
+		res1, res2 = protein_index
+		
+		aa1 = self.seqs[self.test_index][id1]
+		aa2 = self.seqs[self.test_index][id2]
+		
+		if aa1.upper() not in self.q and aa2.upper() not in self.q:
+			return None
+		
+		assert(aa1 == three_to_one[self.pdb[0]["A"][res1].get_resname()])
+		assert(aa2 == three_to_one[self.pdb[0]["A"][res2].get_resname()])
+		
+		for atom1 in self.pdb[0]["A"][res1].get_atoms():
+			for atom2 in self.pdb[0]["A"][res2].get_atoms():
+				dis = atom1 - atom2
+				if dis < self.cutoff:
+					return True
+		
+		return False
+	
+	
+	def score_mij(self, test_id=None, pdb=None, cutoff=8.0):
+		"""
+		Score agreement between mututal information and structural contacts
+		
+		Parameters
+		----------
+		test_id: `str` id of entry in MSA to base scoring off of
+		pdb: BioPython PDB structure object to use for scoring
+		cutoff: `float` distance cutoff for calling contacts
+	
+		Returns
+		-------
+		"""
+		
+		if DEVMODE:
+			assert test_id in self.uid_index, f"test_id `{test_id}` not found in MSA"
+			assert isinstance(pdb, object), f"unexpected type {type(pdb)} for pdb argument"
+			assert isinstance(cutoff, float), f"unexpected type {type(cutoff)} for distance cutoff"
+		
+		
+		self.pdb = pdb
+		self.cutoff = cutoff
+		self.test_id = test_id
+		self.test_index = self.uid_index[test_id]
+		
+		
+		scores = {}
+		cumulative_scores = {}
+		measures = 0
+		for rank, (k,v) in enumerate(sorted(self.mij.items(), key = lambda x: x[1], reverse=True)):
+			l = (
+				self.resindices[self.test_index][int(k[0])],
+				self.resindices[self.test_index][int(k[1])]
+				)
+			
+			contact = self._test_contact(k, l)
+			if contact is not None:
+				if contact:
+					scores[rank] = 1
+				else:
+					scores[rank] = 0
+			
+			if rank == 0:
+				cumulative_scores[rank] = scores[rank]
+			else:
+				cumulative_scores[rank] = scores[rank] + cumulative_scores[rank-1]
+		
+		self.scores = scores
+		self.cumulative_scores = cumulative_scores
+		return
 
-def read_stockholm(filename):
-	"""Stockholm file iterator: yields msa objects"""
-	fp = get_fp(filename)
-	lines = []
-	for line in fp:
-		if line.startswith('//'):
-			yield MSA(lines)
-			lines = []
-		else:
-			lines.append(line.rstrip())
-	fp.close()
-
-
-def column_discretizer(col):
-	gap_count = col.count('-')
-	if gap_count / len(col) > 0.5: return 9 # gap code
-
-	# get average score among all pairwise comparisons
-	scores = []
-	for i, a in enumerate(col):
-		if a not in B62: continue
-		for b in col[i+1:]:
-			if b not in B62: continue
-			scores.append(B62[a][b])
-
-	x = round(statistics.mean(scores))
-	if x < -2: x = -2
-	if x > 6: x = 6
-	return x + 2
-
-
-#############
-## C area ##
-###########
-
-import cppyy
-import numpy as np
-
-cppyy.cppdef("""
-extern "C" {
-#include <string.h>
-#include <stdio.h>
-
-void get_ma(char **seqs, int *lens, int size, float max_similarity, int *results) {
-	int max_mismatch = 0;
-	for (int i = 0; i < size; i++) {
-		char *s1 = seqs[i];
-		int slen = strlen(s1);
-		results[i] = 1;
-		max_mismatch = (int) (lens[i] * (1 - max_similarity) + 1.0);
-		for (int j = 0; j < size; j++) {
-			if (i == j) continue;
-			char *s2 = seqs[j];
-			int mismatch = 0;
-			for (int k = 0; k < slen; k++){
-				if (s1[k] == '.') continue;
-				if (s1[k] == '-') continue;
-				if (s2[k] == '.') continue;
-				if (s2[k] == '-') continue;
-				if (s1[k] != s2[k]) mismatch++;
-				if (mismatch >= max_mismatch) break;
-			}
-			if (mismatch < max_mismatch) results[i] = results[i] + 1;
-		}
-	}
-}}""")
-
-
-
-cppyy.cppdef("""
-extern "C" {
-#include <string.h>
-#include <stdio.h>
-
-// this could be 2x faster by mirroring the half matrix
-// could also use a thread-pool
-// could also be outside python FFS
-void get_similarities(char **seqs, int size, float *results) {
-	for (int i = 0; i < size-1; i++) {
-		double sum = 0;
-		for (int j = i+1; j < size; j++) {
-			char *s1 = seqs[i];
-			char *s2 = seqs[j];
-			int slen = strlen(s1);
-			int match = 0;
-			int total = 0;
-			for (int k = 0; k < slen; k++) {
-				if (s1[k] == '.') continue;
-				if (s1[k] == '-') continue;
-				if (s2[k] == '.') continue;
-				if (s2[k] == '-') continue;
-				if (s1[k] == s2[k]) match++;
-				total++;
-			}
-			sum += (double)match/(double)total;
-		}
-		results[i] = sum/(double)(size -1);
-	}
-}}""")
 
 if __name__ == '__main__':
-	import argparse
-	import math
-	
-	parser = argparse.ArgumentParser()
-	parser.add_argument('stockholm')
-	parser.add_argument('--verbose', action='store_true');
-	arg = parser.parse_args();
-	for msa in read_stockholm(arg.stockholm):
-		print(msa.accession, msa.depth, msa.description)
-		# results = np.zeros(msa.depth, dtype=np.float32)
-		# cppyy.gbl.get_similarities(msa.seqs, msa.depth, results)
-		# for uid, dis in zip(msa.uids, results):
-		# 	if arg.verbose: print(uid, dis)
-		
-		# sequence identity clustering
-		id_threshold = float(0.7)
-		results = np.zeros(msa.depth, dtype=np.intc)
-		#L = len(msa.seqs[0]) - msa.cons.count('.')
-		#lens = [L for i in range(msa.depth)]
-		#lens = np.array(lens, dtype=np.intc)
-		lens = np.array(msa.lens, dtype=np.intc)
-		cppyy.gbl.get_ma(msa.seqs, lens, msa.depth, id_threshold, results)
-		#sys.exit()
-		M_eff = 0
-		for seq, sims in zip(msa.seqs, results):
-			#print("\n"+seq)
-			#print(sims)
-			#print("\n")
-			M_eff += 1/sims
-		
-		print(f"M_eff: {M_eff:.2f}")
-		sys.exit()
+	pass
+	sys.exit()
