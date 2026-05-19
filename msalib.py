@@ -265,7 +265,7 @@ class MSA:
 		return ''.join(letters)
 	
 
-	def _seq_cluster(self):
+	def _seq_cluster(self, sim=None):
 		"""
 		internal function to compute sequence clustering
 		calling out to cppyy
@@ -277,10 +277,16 @@ class MSA:
 			val -> number of msa members with sequence similarity > similarity_cutoff
 		"""
 		
+		if self.similarity_cutoff is None:
+			assert(sim is not None)
+			cutoff = sim
+		else:
+			cutoff = self.similarity_cutoff
+		
 		results = np.zeros(self.depth, dtype=np.intc)
 		lens = np.array(self.lens, dtype=np.intc)
 		
-		cppyy.gbl.get_ma(self.seqs, lens, self.depth, self.similarity_cutoff, results)
+		cppyy.gbl.get_ma(self.seqs, lens, self.depth, cutoff, results)
 		
 		self.ma = {k:v for k, v in enumerate(results)}
 		
